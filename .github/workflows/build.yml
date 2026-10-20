@@ -1,0 +1,285 @@
+name: Build ItemBlcSize
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 8
+      - name: Create project files
+        run: |
+          mkdir -p src/main/java/com/itemblcsize src/main/resources
+          cat > build.gradle <<'EOF_0'
+          buildscript {
+              repositories {
+                  jcenter()
+                  maven { name = "forge"; url = "http://files.minecraftforge.net/maven" }
+              }
+              dependencies {
+                  classpath 'net.minecraftforge.gradle:ForgeGradle:2.1-SNAPSHOT'
+              }
+          }
+          apply plugin: 'net.minecraftforge.gradle.forge'
+
+          version = "1.0"
+          group = "com.itemblcsize"
+          archivesBaseName = "ItemBlcSize"
+
+          sourceCompatibility = targetCompatibility = '1.8'
+          compileJava.options.encoding = 'UTF-8'
+
+          minecraft {
+              version = "1.8.9-11.15.1.2318-1.8.9"
+              runDir = "run"
+              mappings = "stable_22"
+          }
+          EOF_0
+          cat > src/main/resources/mcmod.info <<'EOF_1'
+          [{
+            "modid": "itemblcsize",
+            "name": "ItemBlcSize",
+            "description": "Item size and position settings menu (/itemize)",
+            "version": "1.0",
+            "mcversion": "1.8.9",
+            "authorList": []
+          }]
+          EOF_1
+          cat > src/main/java/com/itemblcsize/ItemBlcSize.java <<'EOF_2'
+          package com.itemblcsize;
+
+          import net.minecraft.client.Minecraft;
+          import net.minecraft.client.renderer.GlStateManager;
+          import net.minecraft.command.CommandBase;
+          import net.minecraft.command.ICommandSender;
+          import net.minecraftforge.client.ClientCommandHandler;
+          import net.minecraftforge.client.event.RenderHandEvent;
+          import net.minecraftforge.common.MinecraftForge;
+          import net.minecraftforge.common.config.Configuration;
+          import net.minecraftforge.fml.common.Mod;
+          import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+          import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+          import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+          import net.minecraftforge.fml.common.gameevent.TickEvent;
+
+          @Mod(modid = "itemblcsize", name = "ItemBlcSize", version = "1.0",
+                  clientSideOnly = true, acceptedMinecraftVersions = "[1.8.9]")
+          public class ItemBlcSize {
+
+              public static Configuration config;
+              public static boolean enabled = true;
+              public static float size = 1.0f;
+              public static float offX = 0f, offY = 0f, offZ = 0f;
+              private static boolean openGui = false;
+
+              @Mod.EventHandler
+              public void preInit(FMLPreInitializationEvent e) {
+                  config = new Configuration(e.getSuggestedConfigurationFile());
+                  load();
+              }
+
+              @Mod.EventHandler
+              public void init(FMLInitializationEvent e) {
+                  MinecraftForge.EVENT_BUS.register(this);
+                  ClientCommandHandler.instance.registerCommand(new CommandBase() {
+                      @Override public String getCommandName() { return "itemize"; }
+                      @Override public String getCommandUsage(ICommandSender s) { return "/itemize"; }
+                      @Override public int getRequiredPermissionLevel() { return 0; }
+                      @Override public boolean canCommandSenderUseCommand(ICommandSender s) { return true; }
+                      @Override public void processCommand(ICommandSender s, String[] a) { openGui = true; }
+                  });
+              }
+
+              public static void load() {
+                  config.load();
+                  enabled = config.getBoolean("enabled", "general", true, "Enable mod");
+                  size = config.getFloat("size", "general", 1.0f, 0.1f, 3.0f, "Item size");
+                  offX = config.getFloat("offsetX", "general", 0f, -1f, 1f, "Offset X");
+                  offY = config.getFloat("offsetY", "general", 0f, -1f, 1f, "Offset Y");
+                  offZ = config.getFloat("offsetZ", "general", 0f, -1f, 1f, "Offset Z");
+                  if (config.hasChanged()) config.save();
+              }
+
+              public static void save() {
+                  config.get("general", "enabled", true).set(enabled);
+                  config.get("general", "size", 1.0).set((double) size);
+                  config.get("general", "offsetX", 0.0).set((double) offX);
+                  config.get("general", "offsetY", 0.0).set((double) offY);
+                  config.get("general", "offsetZ", 0.0).set((double) offZ);
+                  config.save();
+              }
+
+              public static void reset() {
+                  enabled = true;
+                  size = 1.0f;
+                  offX = offY = offZ = 0f;
+              }
+
+              // Open the menu one tick later, because chat closes right after a command runs
+              @SubscribeEvent
+              public void onTick(TickEvent.ClientTickEvent e) {
+                  if (e.phase == TickEvent.Phase.END && openGui) {
+                      openGui = false;
+                      Minecraft.getMinecraft().displayGuiScreen(new GuiItemSettings());
+                  }
+              }
+
+              @SubscribeEvent
+              public void onRenderHand(RenderHandEvent e) {
+                  if (!enabled) return;
+                  GlStateManager.translate(offX, offY, offZ);
+                  GlStateManager.scale(size, size, size);
+              }
+          }
+          EOF_2
+          cat > src/main/java/com/itemblcsize/GuiItemSettings.java <<'EOF_3'
+          package com.itemblcsize;
+
+          import net.minecraft.client.gui.GuiButton;
+          import net.minecraft.client.gui.GuiScreen;
+
+          import java.io.IOException;
+
+          public class GuiItemSettings extends GuiScreen {
+
+              private GuiButton toggle;
+
+              @Override
+              public void initGui() {
+                  buttonList.clear();
+                  int cx = width / 2;
+                  int y = height / 4;
+                  toggle = new GuiButton(0, cx - 100, y, 200, 20, toggleText());
+                  buttonList.add(toggle);
+                  buttonList.add(new SettingSlider(1, cx - 100, y + 26, 200, "Size", 0.1f, 3.0f,
+                          ItemBlcSize.size, v -> ItemBlcSize.size = v));
+                  buttonList.add(new SettingSlider(2, cx - 100, y + 50, 200, "Position X", -1f, 1f,
+                          ItemBlcSize.offX, v -> ItemBlcSize.offX = v));
+                  buttonList.add(new SettingSlider(3, cx - 100, y + 74, 200, "Position Y", -1f, 1f,
+                          ItemBlcSize.offY, v -> ItemBlcSize.offY = v));
+                  buttonList.add(new SettingSlider(4, cx - 100, y + 98, 200, "Position Z", -1f, 1f,
+                          ItemBlcSize.offZ, v -> ItemBlcSize.offZ = v));
+                  buttonList.add(new GuiButton(5, cx - 100, y + 128, 98, 20, "Reset"));
+                  buttonList.add(new GuiButton(6, cx + 2, y + 128, 98, 20, "Done"));
+              }
+
+              private String toggleText() {
+                  return "Mod: " + (ItemBlcSize.enabled ? "ON" : "OFF");
+              }
+
+              @Override
+              protected void actionPerformed(GuiButton b) throws IOException {
+                  if (b.id == 0) {
+                      ItemBlcSize.enabled = !ItemBlcSize.enabled;
+                      toggle.displayString = toggleText();
+                  } else if (b.id == 5) {
+                      ItemBlcSize.reset();
+                      initGui();
+                  } else if (b.id == 6) {
+                      mc.displayGuiScreen(null);
+                  }
+              }
+
+              @Override
+              public void drawScreen(int mx, int my, float pt) {
+                  drawDefaultBackground();
+                  drawCenteredString(fontRendererObj, "ItemBlcSize", width / 2, height / 4 - 20, 0xFFFFFF);
+                  super.drawScreen(mx, my, pt);
+              }
+
+              @Override
+              public void onGuiClosed() {
+                  ItemBlcSize.save();
+              }
+
+              @Override
+              public boolean doesGuiPauseGame() {
+                  return false;
+              }
+          }
+          EOF_3
+          cat > src/main/java/com/itemblcsize/SettingSlider.java <<'EOF_4'
+          package com.itemblcsize;
+
+          import net.minecraft.client.Minecraft;
+          import net.minecraft.client.gui.GuiButton;
+          import net.minecraft.client.renderer.GlStateManager;
+
+          import java.util.function.Consumer;
+
+          public class SettingSlider extends GuiButton {
+
+              private final String label;
+              private final float min, max;
+              private final Consumer<Float> onChange;
+              private float value;
+              private boolean dragging;
+
+              public SettingSlider(int id, int x, int y, int w, String label,
+                                   float min, float max, float value, Consumer<Float> onChange) {
+                  super(id, x, y, w, 20, "");
+                  this.label = label;
+                  this.min = min;
+                  this.max = max;
+                  this.value = value;
+                  this.onChange = onChange;
+                  updateText();
+              }
+
+              private void updateText() {
+                  displayString = label + ": " + String.format("%.2f", value);
+              }
+
+              private void setFromMouse(int mx) {
+                  float p = (float) (mx - (xPosition + 4)) / (float) (width - 8);
+                  p = Math.max(0f, Math.min(1f, p));
+                  value = Math.round((min + (max - min) * p) * 100f) / 100f;
+                  onChange.accept(value);
+                  updateText();
+              }
+
+              @Override
+              protected int getHoverState(boolean mouseOver) {
+                  return 0;
+              }
+
+              @Override
+              protected void mouseDragged(Minecraft mc, int mx, int my) {
+                  if (!visible) return;
+                  if (dragging) setFromMouse(mx);
+                  mc.getTextureManager().bindTexture(buttonTextures);
+                  GlStateManager.color(1f, 1f, 1f, 1f);
+                  int pos = xPosition + (int) (((value - min) / (max - min)) * (width - 8));
+                  drawTexturedModalRect(pos, yPosition, 0, 66, 4, 20);
+                  drawTexturedModalRect(pos + 4, yPosition, 196, 66, 4, 20);
+              }
+
+              @Override
+              public boolean mousePressed(Minecraft mc, int mx, int my) {
+                  if (super.mousePressed(mc, mx, my)) {
+                      dragging = true;
+                      setFromMouse(mx);
+                      return true;
+                  }
+                  return false;
+              }
+
+              @Override
+              public void mouseReleased(int mx, int my) {
+                  dragging = false;
+              }
+          }
+          EOF_4
+      - name: Install Gradle 2.14.1
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-2.14.1-bin.zip
+          unzip -q gradle-2.14.1-bin.zip
+      - name: Build
+        run: ./gradle-2.14.1/bin/gradle setupCIWorkspace build --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ItemBlcSize-jar
+          path: build/libs/ItemBlcSize-1.0.jar
